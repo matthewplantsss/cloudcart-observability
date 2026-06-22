@@ -1,0 +1,105 @@
+services:
+  database:
+    image: postgres:17-alpine
+    container_name: cloudcart-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    ports:
+      - "${POSTGRES_PORT}:5432"
+
+    volumes:
+      - cloudcart-postgres-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    networks:
+      - cloudcart-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: cloudcart-backend
+    restart: unless-stopped
+
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      PGHOST: database
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      FRONTEND_ORIGIN: http://localhost:${FRONTEND_PORT}
+
+    ports:
+      - "${BACKEND_PORT}:4000"
+
+    depends_on:
+      database:
+        condition: service_healthy
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        npm run db:init
+        npm start
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+    networks:
+      - cloudcart-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    container_name: cloudcart-frontend
+    restart: unless-stopped
+
+    ports:
+      - "${FRONTEND_PORT}:80"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    networks:
+      - cloudcart-network
+
+networks:
+  cloudcart-network:
+    name: cloudcart-network
+    driver: bridge
+
+volumes:
+  cloudcart-postgres-data:
+    name: cloudcart-postgres-data
